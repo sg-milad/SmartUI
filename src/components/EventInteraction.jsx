@@ -13,70 +13,53 @@ function EventInteraction({
 }) {
   return (
     <div className="event-interaction">
-      <h3>{selectedEvent.name}</h3>
+      <h2>Event: {selectedEvent.name}</h2>
       
-      <div className="filters">
-        <h4>Event Filters</h4>
+      <div className="event-filters">
+        <div className="form-group">
+          <label>From Block:</label>
+          <input
+            type="number"
+            value={fromBlock}
+            onChange={(e) => setFromBlock(e.target.value)}
+            placeholder="From block number"
+          />
+        </div>
+        <div className="form-group">
+          <label>To Block:</label>
+          <input
+            type="number"
+            value={toBlock}
+            onChange={(e) => setToBlock(e.target.value)}
+            placeholder="To block number (or leave empty for latest)"
+          />
+        </div>
+        
         {selectedEvent.inputs.filter(input => input.indexed).map((input, index) => (
-          <div key={`${input.name}-${index}`} className="form-group">
-            <label>
-              {input.name} ({input.type}):
-              <input
-                type="text"
-                value={filterValues[input.name] || ''}
-                onChange={(e) => onFilterChange(input.name, e.target.value)}
-                placeholder={`Filter by ${input.name}`}
-              />
-            </label>
+          <div key={index} className="form-group">
+            <label>{input.name} ({input.type}):</label>
+            <input
+              type="text"
+              value={filterValues[input.name] || ''}
+              onChange={(e) => onFilterChange(input.name, e.target.value)}
+              placeholder={`Filter by ${input.name}`}
+            />
           </div>
         ))}
-
-        <div className="block-range">
-          <div className="form-group">
-            <label>
-              From Block:
-              <input
-                type="text"
-                value={fromBlock}
-                onChange={(e) => setFromBlock(e.target.value)}
-                placeholder="From block number"
-              />
-            </label>
-          </div>
-          <div className="form-group">
-            <label>
-              To Block:
-              <input
-                type="text"
-                value={toBlock}
-                onChange={(e) => setToBlock(e.target.value)}
-                placeholder="To block number (or latest)"
-              />
-            </label>
-          </div>
-        </div>
-
-        <button onClick={onGetEvents}>Get Events</button>
       </div>
+
+      <button className="button primary" onClick={onGetEvents}>
+        Get Events
+      </button>
 
       {eventLogs.length > 0 && (
         <div className="event-logs">
-          <h4>Event Logs</h4>
-          {eventLogs.map((log) => (
-            <div key={`${log.blockNumber}-${log.logIndex}`} className="event-log">
-              <div>Block: {log.blockNumber}</div>
-              <div>Transaction: {log.transactionHash}</div>
-              {log.decodeError ? (
-                <div className="error">Decode Error: {log.decodeError}</div>
-              ) : (
-                <div className="args">
-                  {Object.entries(log.args || {}).map(([key, value]) => (
-                    <div key={key}>
-                      {key}: {value.toString()}
-                    </div>
-                  ))}
-                </div>
-              )}
+          <h3>Event Logs:</h3>
+          {eventLogs.map((log, index) => (
+            <div key={index} className="event-log">
+              <p>Block: {log.blockNumber}</p>
+              <p>Transaction: {log.transactionHash}</p>
+              <pre>{JSON.stringify(log.args, null, 2)}</pre>
             </div>
           ))}
         </div>

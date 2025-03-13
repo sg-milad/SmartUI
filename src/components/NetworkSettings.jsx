@@ -12,38 +12,35 @@ function NetworkSettings({
     <div className="network-settings">
       <h2>Network Settings</h2>
       <div className="form-group">
-        <label>
-          Network:
-          <select 
-            value={selectedChain} 
-            onChange={(e) => setSelectedChain(e.target.value)}
-          >
-            <option value="localhost">Localhost</option>
-            <option value="mainnet">Mainnet</option>
-            <option value="sepolia">Sepolia</option>
-            <option value="goerli">Goerli</option>
-            <option value="custom">Custom</option>
-          </select>
-        </label>
+        <label>Select Network:</label>
+        <select 
+          value={selectedChain} 
+          onChange={(e) => setSelectedChain(e.target.value)}
+          className="select-styled"
+        >
+          <option value="localhost">Localhost</option>
+          <option value="mainnet">Mainnet</option>
+          <option value="sepolia">Sepolia</option>
+          <option value="goerli">Goerli</option>
+          <option value="custom">Custom RPC</option>
+        </select>
       </div>
 
       {selectedChain === 'custom' && (
         <div className="form-group">
-          <label>
-            Custom RPC URL:
-            <input
-              type="text"
-              value={customRpc}
-              onChange={(e) => setCustomRpc(e.target.value)}
-              placeholder="Enter custom RPC URL"
-            />
-          </label>
+          <label>Custom RPC URL:</label>
+          <input
+            type="text"
+            value={customRpc}
+            onChange={(e) => setCustomRpc(e.target.value)}
+            placeholder="Enter custom RPC URL"
+          />
         </div>
       )}
 
       <button 
+        className={`button ${connected ? 'secondary' : 'primary'}`}
         onClick={connectWallet}
-        className={connected ? 'connected' : ''}
       >
         {connected ? 'Connected' : 'Connect Wallet'}
       </button>

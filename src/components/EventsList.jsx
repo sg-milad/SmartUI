@@ -1,19 +1,20 @@
 import React from 'react';
 
 function EventsList({ events, selectedEvent, onEventSelect }) {
+  // Group events by their type/category if needed
   return (
     <div className="events-list">
       <h2>Contract Events</h2>
-      <div className="list">
+      <div className="events-grid">
         {events.map((event, index) => (
-          <div
-            key={`${event.name}-${index}`}
-            className={`event-item ${selectedEvent === event ? 'selected' : ''}`}
+          <button
+            key={index}
+            className={`event-button ${selectedEvent === event ? 'selected' : ''}`}
             onClick={() => onEventSelect(event)}
           >
-            <span className="badge event">event</span>
-            <span className="name">{event.name}</span>
-          </div>
+            <span className="event-name">{event.name}</span>
+            <span className="event-type">Event</span>
+          </button>
         ))}
       </div>
     </div>
