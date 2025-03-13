@@ -3,9 +3,20 @@ import {
   createPublicClient, 
   http,
   createWalletClient,
-  custom
+  custom,
+  decodeEventLog,
+  formatEther,
+  formatGwei
 } from 'viem';
 import { hardhat, mainnet, sepolia, goerli } from 'viem/chains';
+import NetworkSettings from './components/NetworkSettings';
+import ContractConfig from './components/ContractConfig';
+import FunctionsList from './components/FunctionsList';
+import EventsList from './components/EventsList';
+import FunctionInteraction from './components/FunctionInteraction';
+import EventInteraction from './components/EventInteraction';
+import TransactionDetails from './components/TransactionDetails';
+import StatusMessage from './components/StatusMessage';
 
 function App() {
   const [contractAddress, setContractAddress] = useState('');
@@ -16,12 +27,19 @@ function App() {
   const [walletClient, setWalletClient] = useState(null);
   const [abi, setAbi] = useState(null);
   const [functions, setFunctions] = useState([]);
+  const [events, setEvents] = useState([]);
   const [selectedFunction, setSelectedFunction] = useState(null);
+  const [selectedEvent, setSelectedEvent] = useState(null);
   const [inputValues, setInputValues] = useState({});
+  const [eventFilterValues, setEventFilterValues] = useState({});
   const [result, setResult] = useState(null);
+  const [eventLogs, setEventLogs] = useState([]);
   const [connected, setConnected] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [transactionDetails, setTransactionDetails] = useState(null);
+  const [fromBlock, setFromBlock] = useState('');
+  const [toBlock, setToBlock] = useState('');
 
   // Chain configuration
   const chains = {
@@ -41,6 +59,7 @@ function App() {
       });
       setClient(newClient);
       setStatus(`Connected to ${selectedChain}`);
+      setError('');
     } catch (err) {
       setError(`Failed to connect to ${selectedChain}: ${err.message}`);
     }
@@ -63,12 +82,13 @@ function App() {
       setWalletClient(wallet);
       setConnected(true);
       setStatus(`Connected to wallet: ${accounts[0].slice(0, 6)}...${accounts[0].slice(-4)}`);
+      setError('');
     } catch (err) {
       setError(`Failed to connect wallet: ${err.message}`);
     }
   };
 
-  // Parse ABI when the ABI string changes - IMPROVED VERSION
+  // Parse ABI when the ABI string changes
   const parseContractAbi = () => {
     try {
       if (!contractAbi) {
@@ -116,7 +136,13 @@ function App() {
       // Extract function definitions from ABI
       const abiFunctions = validAbi.filter(item => item.type === 'function');
       setFunctions(abiFunctions);
-      setStatus(`ABI parsed successfully. Found ${abiFunctions.length} function(s).`);
+      
+      // Extract event definitions from ABI
+      const abiEvents = validAbi.filter(item => item.type === 'event');
+      setEvents(abiEvents);
+      
+      setStatus(`ABI parsed successfully. Found ${abiFunctions.length} function(s) and ${abiEvents.length} event(s).`);
+      setError('');
     } catch (err) {
       setError(`Failed to parse ABI: ${err.message}`);
     }
@@ -125,13 +151,109 @@ function App() {
   // Handle function selection
   const handleFunctionSelect = (func) => {
     setSelectedFunction(func);
+    setSelectedEvent(null);
     setInputValues({});  // Reset input values
     setResult(null);     // Reset results
+    setTransactionDetails(null); // Reset transaction details
+  };
+
+  // Handle event selection
+  const handleEventSelect = (event) => {
+    setSelectedEvent(event);
+    setSelectedFunction(null);
+    setEventFilterValues({}); // Reset filter values
+    setEventLogs([]);         // Reset event logs
   };
 
   // Handle input changes
   const handleInputChange = (name, value) => {
     setInputValues(prev => ({ ...prev, [name]: value }));
+  };
+
+  // Handle event filter input changes
+  const handleEventFilterChange = (name, value) => {
+    setEventFilterValues(prev => ({ ...prev, [name]: value }));
+  };
+
+  // Get past events
+  const getEvents = async () => {
+    if (!contractAddress || !selectedEvent || !client || !abi) {
+      setError('Missing required information for fetching events');
+      return;
+    }
+
+    try {
+      setStatus('Fetching events...');
+      setError('');
+      setEventLogs([]);
+      
+      // Prepare filter topics based on indexed parameters
+      const indexedInputs = selectedEvent.inputs.filter(input => input.indexed);
+      
+      // Create filter object
+      const filter = {
+        address: contractAddress,
+        event: selectedEvent,
+        fromBlock: fromBlock ? BigInt(fromBlock) : undefined,
+        toBlock: toBlock ? BigInt(toBlock) : undefined,
+      };
+      
+      // Add indexed parameter filters if provided
+      if (indexedInputs.length > 0) {
+        const args = {};
+        
+        indexedInputs.forEach(input => {
+          const value = eventFilterValues[input.name];
+          if (value && value.trim() !== '') {
+            args[input.name] = value;
+          }
+        });
+        
+        if (Object.keys(args).length > 0) {
+          filter.args = args;
+        }
+      }
+
+      // Get the logs
+      const logs = await client.getLogs(filter);
+      
+      // Process logs to make them more readable
+      const processedLogs = logs.map((log, index) => {
+        try {
+          // Decode the log data
+          const decoded = decodeEventLog({
+            abi,
+            data: log.data,
+            topics: log.topics,
+          });
+          
+          return {
+            id: index,
+            blockNumber: Number(log.blockNumber),
+            blockHash: log.blockHash,
+            transactionHash: log.transactionHash,
+            eventName: selectedEvent.name,
+            args: decoded.args,
+            rawLog: log
+          };
+        } catch (decodeErr) {
+          return {
+            id: index,
+            blockNumber: Number(log.blockNumber),
+            blockHash: log.blockHash,
+            transactionHash: log.transactionHash,
+            eventName: selectedEvent.name,
+            decodeError: decodeErr.message,
+            rawLog: log
+          };
+        }
+      });
+      
+      setEventLogs(processedLogs);
+      setStatus(`Found ${processedLogs.length} event logs`);
+    } catch (err) {
+      setError(`Error fetching events: ${err.message}`);
+    }
   };
 
   // Execute the selected function
@@ -144,6 +266,7 @@ function App() {
     try {
       setStatus('Executing transaction...');
       setError('');
+      setTransactionDetails(null);
       
       const args = selectedFunction.inputs.map(input => {
         const value = inputValues[input.name];
@@ -190,151 +313,194 @@ function App() {
         
         const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
         
-        const hash = await walletClient.writeContract({
-          address: contractAddress,
-          abi,
-          functionName: selectedFunction.name,
-          args,
-          account: accounts[0]
-        });
-        
-        setResult(`Transaction sent: ${hash}`);
-        setStatus('Write transaction submitted');
+        try {
+          // Get gas estimate first to check for potential reverts
+          const gasEstimate = await client.estimateContractGas({
+            address: contractAddress,
+            abi,
+            functionName: selectedFunction.name,
+            args,
+            account: accounts[0]
+          });
+          
+          // If we get here, gas estimate was successful, now execute the transaction
+          const hash = await walletClient.writeContract({
+            address: contractAddress,
+            abi,
+            functionName: selectedFunction.name,
+            args,
+            account: accounts[0]
+          });
+          
+          setResult(`Transaction sent: ${hash}`);
+          setStatus('Write transaction submitted');
+          
+          // Wait for transaction receipt to get more details
+          const receipt = await client.waitForTransactionReceipt({ 
+            hash,
+            confirmations: 1
+          });
+          
+          // Check if transaction succeeded or reverted
+          if (receipt.status === 'success') {
+            setStatus('Transaction successful!');
+            
+            // Parse events from the receipt
+            const events = receipt.logs.map(log => {
+              try {
+                const decoded = decodeEventLog({
+                  abi,
+                  data: log.data,
+                  topics: log.topics,
+                });
+                return {
+                  eventName: decoded.eventName,
+                  args: decoded.args,
+                  address: log.address,
+                  blockNumber: Number(log.blockNumber),
+                  transactionHash: log.transactionHash,
+                  logIndex: Number(log.logIndex)
+                };
+              } catch (e) {
+                return {
+                  eventName: 'Unknown',
+                  rawLog: log,
+                  error: 'Could not decode event'
+                };
+              }
+            });
+            
+            // Get transaction details
+            const txDetails = await client.getTransaction({ hash });
+            
+            setTransactionDetails({
+              hash: receipt.transactionHash,
+              blockNumber: Number(receipt.blockNumber),
+              gasUsed: formatGwei(receipt.gasUsed),
+              effectiveGasPrice: formatGwei(receipt.effectiveGasPrice),
+              status: receipt.status,
+              events: events,
+              from: txDetails.from,
+              to: txDetails.to,
+              value: txDetails.value ? formatEther(txDetails.value) : '0',
+              nonce: txDetails.nonce
+            });
+          } else {
+            setError('Transaction reverted');
+          }
+        } catch (err) {
+          // Handle revert errors more explicitly
+          setError(formatRevertError(err));
+        }
       }
     } catch (err) {
-      setError(`Error executing function: ${err.message}`);
+      setError(formatRevertError(err));
     }
+  };
+  
+  // Format revert errors to be more readable
+  const formatRevertError = (error) => {
+    // Check if it's a contract revert error
+    if (error.message.includes('reverted') || error.message.includes('revert')) {
+      let errorDetails = 'Transaction would revert';
+      
+      // Extract custom error message if available
+      const revertReasonMatch = error.message.match(/reason="([^"]+)"/);
+      if (revertReasonMatch && revertReasonMatch[1]) {
+        errorDetails += `: "${revertReasonMatch[1]}"`;
+      } 
+      // Extract custom error name if available
+      else if (error.message.includes('CUSTOM_ERROR')) {
+        const customErrorMatch = error.message.match(/CUSTOM_ERROR\(([^)]+)\)/);
+        if (customErrorMatch && customErrorMatch[1]) {
+          errorDetails += `: Custom error "${customErrorMatch[1]}"`;
+        }
+      }
+      
+      // Add the gas estimation hint
+      errorDetails += '\n\nThis usually indicates the transaction would fail on-chain. Possible reasons include:';
+      errorDetails += '\n- Invalid parameters';
+      errorDetails += '\n- Failed condition check in the contract';
+      errorDetails += '\n- Insufficient permissions';
+      errorDetails += '\n- Contract state preventing execution';
+      
+      return errorDetails;
+    }
+    
+    // Handle other types of errors
+    if (error.message.includes('insufficient funds')) {
+      return 'Insufficient funds for gas * price + value';
+    }
+    
+    // Default error handling
+    return `Error executing function: ${error.message}`;
   };
 
   return (
     <div className="container">
       <h1>Smart Contract Interaction Tool</h1>
       
-      <div className="network-section">
-        <h2>Network Settings</h2>
-        <div className="form-group">
-          <label>Select Network:</label>
-          <select 
-            value={selectedChain} 
-            onChange={(e) => setSelectedChain(e.target.value)}
-          >
-            <option value="localhost">Localhost</option>
-            <option value="mainnet">Ethereum Mainnet</option>
-            <option value="sepolia">Sepolia Testnet</option>
-            <option value="goerli">Goerli Testnet</option>
-            <option value="custom">Custom RPC</option>
-          </select>
+      <NetworkSettings
+        selectedChain={selectedChain}
+        setSelectedChain={setSelectedChain}
+        customRpc={customRpc}
+        setCustomRpc={setCustomRpc}
+        connected={connected}
+        connectWallet={connectWallet}
+      />
+      
+      <ContractConfig
+        contractAddress={contractAddress}
+        setContractAddress={setContractAddress}
+        contractAbi={contractAbi}
+        setContractAbi={setContractAbi}
+        parseContractAbi={parseContractAbi}
+      />
+
+      <div className="interaction-container">
+        <div className="functions-container">
+          <FunctionsList 
+            functions={functions} 
+            selectedFunction={selectedFunction}
+            onFunctionSelect={handleFunctionSelect} 
+          />
+          <EventsList 
+            events={events}
+            selectedEvent={selectedEvent}
+            onEventSelect={handleEventSelect}
+          />
         </div>
-        
-        {selectedChain === 'custom' && (
-          <div className="form-group">
-            <label>Custom RPC URL:</label>
-            <input 
-              type="text" 
-              value={customRpc} 
-              onChange={(e) => setCustomRpc(e.target.value)} 
-              placeholder="e.g., https://rpc.example.com"
-            />
-          </div>
+
+        {selectedFunction && (
+          <FunctionInteraction
+            selectedFunction={selectedFunction}
+            inputValues={inputValues}
+            onInputChange={handleInputChange}
+            onExecute={executeFunction}
+            result={result}
+          />
         )}
-        
-        <button onClick={connectWallet} className="button">
-          {connected ? 'Wallet Connected' : 'Connect Wallet'}
-        </button>
-      </div>
-      
-      <div className="contract-section">
-        <h2>Contract Configuration</h2>
-        <div className="form-group">
-          <label>Contract Address:</label>
-          <input 
-            type="text" 
-            value={contractAddress} 
-            onChange={(e) => setContractAddress(e.target.value)} 
-            placeholder="0x..."
+
+        {selectedEvent && (
+          <EventInteraction
+            selectedEvent={selectedEvent}
+            filterValues={eventFilterValues}
+            onFilterChange={handleEventFilterChange}
+            fromBlock={fromBlock}
+            toBlock={toBlock}
+            setFromBlock={setFromBlock}
+            setToBlock={setToBlock}
+            onGetEvents={getEvents}
+            eventLogs={eventLogs}
           />
-        </div>
-        
-        <div className="form-group">
-          <label>Contract ABI:</label>
-          <textarea 
-            value={contractAbi} 
-            onChange={(e) => setContractAbi(e.target.value)} 
-            placeholder="[{...}]"
-            rows={5}
-          />
-          <div className="helper-text">Paste the raw ABI JSON array or an object containing an 'abi' field</div>
-        </div>
-        
-        <button onClick={parseContractAbi} className="button">
-          Parse ABI
-        </button>
+        )}
       </div>
-      
-      {functions.length > 0 && (
-        <div className="functions-section">
-          <h2>Contract Functions ({functions.length})</h2>
-          <div className="functions-list">
-            {functions.map(func => (
-              <div 
-                key={`${func.name}-${func.inputs.map(i => i.type).join('-')}`}
-                className={`function-item ${selectedFunction && selectedFunction.name === func.name ? 'selected' : ''}`}
-                onClick={() => handleFunctionSelect(func)}
-              >
-                <span className={`function-type ${func.stateMutability}`}>
-                  {func.stateMutability || 'nonpayable'}
-                </span>
-                <span className="function-name">{func.name}</span>
-                <span className="function-signature">
-                  ({func.inputs.map(input => `${input.type} ${input.name}`).join(', ')})
-                  {func.outputs && func.outputs.length > 0 ? 
-                    ` → (${func.outputs.map(output => output.type).join(', ')})` : 
-                    ''
-                  }
-                </span>
-              </div>
-            ))}
-          </div>
-          
-          {selectedFunction && (
-            <div className="function-interaction">
-              <h3>Function: {selectedFunction.name}</h3>
-              
-              {selectedFunction.inputs.length > 0 && (
-                <div className="function-inputs">
-                  <h4>Inputs</h4>
-                  {selectedFunction.inputs.map(input => (
-                    <div key={input.name || `input-${Math.random()}`} className="form-group">
-                      <label>{input.name || 'param'} ({input.type}):</label>
-                      <input 
-                        type="text" 
-                        value={inputValues[input.name] || ''} 
-                        onChange={(e) => handleInputChange(input.name || 'param', e.target.value)} 
-                        placeholder={`${input.type}`}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-              
-              <button onClick={executeFunction} className="button execute-button">
-                {selectedFunction.stateMutability === 'view' || selectedFunction.stateMutability === 'pure' 
-                  ? 'Read' : 'Write'}
-              </button>
-              
-              {result && (
-                <div className="result-box">
-                  <h4>Result:</h4>
-                  <pre>{result}</pre>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+
+      {transactionDetails && (
+        <TransactionDetails details={transactionDetails} />
       )}
-      
-      {status && <div className="status-message">{status}</div>}
-      {error && <div className="error-message">{error}</div>}
+
+      <StatusMessage status={status} error={error} />
     </div>
   );
 }
